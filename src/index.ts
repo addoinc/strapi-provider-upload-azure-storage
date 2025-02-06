@@ -1,7 +1,11 @@
+// IMPORTANT: Make sure to import `instrument.js` at the top of your file.
+// If you're using ECMAScript Modules (ESM) syntax, use `import "./instrument.js";`
 import { DefaultAzureCredential } from '@azure/identity';
 import {
     AnonymousCredential,
+    BlobSASPermissions,
     BlobServiceClient,
+    generateBlobSASQueryParameters,
     newPipeline,
     PublicAccessType,
     StorageSharedKeyCredential,
@@ -20,9 +24,9 @@ type CommonConfig = {
     removeCN?: string;
     uploadOptions?: {
         bufferSize: number;
-        maxBuffers: number,
+        maxBuffers: number;
     };
-}
+};
 
 type Config = DefaultConfig | ManagedIdentityConfig;
 
@@ -34,6 +38,7 @@ type DefaultConfig = CommonConfig & {
 
 type ManagedIdentityConfig = CommonConfig & {
     authType: 'msi';
+    accountKey: string;
     clientId?: string;
 };
 
@@ -61,7 +66,7 @@ function getFileName(path: string, file: StrapiFile) {
     return `${trimParam(path)}/${file.hash}${file.ext}`;
 }
 
-function makeBlobServiceClient(config: Config) {
+function makeBlobServiceClient(config: Config, file: StrapiFile) {
     const serviceBaseURL = getServiceBaseUrl(config);
 
     switch (config.authType) {
@@ -69,7 +74,8 @@ function makeBlobServiceClient(config: Config) {
             const account = trimParam(config.account);
             const accountKey = trimParam(config.accountKey);
             const sasToken = trimParam(config.sasToken);
-            if (sasToken != '') {
+            const isPublic = file.hash.includes('public');
+            if (sasToken != '' && !isPublic) {
                 const anonymousCredential = new AnonymousCredential();
                 return new BlobServiceClient(`${serviceBaseURL}${sasToken}`, anonymousCredential);
             }
@@ -105,6 +111,8 @@ async function handleUpload(
     file: StrapiFile
 ): Promise<void> {
     const serviceBaseURL = getServiceBaseUrl(config);
+    const isPublic = file.hash.includes('public');
+    const blobName = getFileName(config.defaultPath, file);
     const containerClient = blobSvcClient.getContainerClient(trimParam(config.containerName));
     const client = containerClient.getBlockBlobClient(getFileName(config.defaultPath, file));
 
@@ -113,7 +121,9 @@ async function handleUpload(
             trimParam(config?.publicAccessType) === 'container' ||
             trimParam(config?.publicAccessType) === 'blob'
         ) {
-            await containerClient.createIfNotExists({ access: config.publicAccessType });
+            await containerClient.createIfNotExists({
+                access: config.publicAccessType,
+            });
         } else {
             await containerClient.createIfNotExists();
         }
@@ -126,8 +136,34 @@ async function handleUpload(
         },
     };
 
+    // ✅ Generate SAS Token before upload
+    const permissions = new BlobSASPermissions();
+    permissions.read = true; // Allow read access only
+
+    const expiryTime = isPublic
+        ? new Date(new Date().setFullYear(new Date().getFullYear() + 10)) // 10 years for public files
+        : new Date(new Date().valueOf() + 3600 * 1000);
+
     const cdnBaseURL = trimParam(config.cdnBaseURL);
-    file.url = cdnBaseURL ? client.url.replace(serviceBaseURL, cdnBaseURL) : client.url;
+
+    if (isPublic) {
+        const sasToken = generateBlobSASQueryParameters(
+            {
+                containerName: config.containerName,
+                blobName,
+                permissions,
+                expiresOn: expiryTime,
+            },
+            new StorageSharedKeyCredential(config.account, config.accountKey)
+        ).toString();
+
+        // ✅ Set the correct file URL before upload
+        file.url = `${client.url}?${sasToken}`;
+        file.url = cdnBaseURL ? client.url.replace(serviceBaseURL, cdnBaseURL) : file.url;
+    } else {
+        file.url = cdnBaseURL ? client.url.replace(serviceBaseURL, cdnBaseURL) : client.url;
+    }
+
     if (
         file.url.includes(`/${config.containerName}/`) &&
         config.removeCN &&
@@ -138,8 +174,8 @@ async function handleUpload(
 
     await client.uploadStream(
         file.stream,
-        (config.uploadOptions || uploadOptions).bufferSize,
-        (config.uploadOptions || uploadOptions).maxBuffers,
+        (config.uploadOptions || uploadOptions)?.bufferSize,
+        (config.uploadOptions || uploadOptions)?.maxBuffers,
         options
     );
 }
@@ -204,15 +240,17 @@ module.exports = {
         },
     },
     init: (config: Config) => {
-        const blobSvcClient = makeBlobServiceClient(config);
         return {
             upload(file: StrapiFile) {
+                const blobSvcClient = makeBlobServiceClient(config, file);
                 return handleUpload(config, blobSvcClient, file);
             },
             uploadStream(file: StrapiFile) {
+                const blobSvcClient = makeBlobServiceClient(config, file);
                 return handleUpload(config, blobSvcClient, file);
             },
             delete(file: StrapiFile) {
+                const blobSvcClient = makeBlobServiceClient(config, file);
                 return handleDelete(config, blobSvcClient, file);
             },
         };

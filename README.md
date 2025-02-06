@@ -21,11 +21,11 @@ These instructions will get you a copy of the project up and running on your loc
 Inside your strapi project run the following
 
 ```sh
-yarn add strapi-provider-upload-azure-storage
+yarn add @addoinc/strapi-provider-upload-azure-storage
 
 # or
 
-npm install strapi-provider-upload-azure-storage
+npm install @addoinc/strapi-provider-upload-azure-storage
 ```
 
 ## Usage
@@ -38,7 +38,7 @@ This is an example `plugins.js` file for Azure storage:
 module.exports = ({ env }) => ({
   upload: {
     config: {
-      provider: "strapi-provider-upload-azure-storage",
+      provider: "@addoinc/strapi-provider-upload-azure-storage",
       providerOptions: {
         authType: env("STORAGE_AUTH_TYPE", "default"),
         account: env("STORAGE_ACCOUNT"),
@@ -64,7 +64,7 @@ module.exports = ({ env }) => ({
 module.exports = ({ env }) => ({
   upload: {
     config: {
-      provider: "strapi-provider-upload-azure-storage",
+      provider: "@addoinc/strapi-provider-upload-azure-storage",
       providerOptions: {
         authType: 'msi',
         account: env("STORAGE_ACCOUNT"),
