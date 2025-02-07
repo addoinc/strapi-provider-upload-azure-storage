@@ -63,7 +63,11 @@ function getServiceBaseUrl(config: Config) {
 }
 
 function getFileName(path: string, file: StrapiFile) {
-    return `${trimParam(path)}/${file.hash}${file.ext}`;
+    if (trimParam(path)) {
+        return `${trimParam(path)}/${file.hash}${file.ext}`;
+    } else {
+        return `${file.hash}${file.ext}`;
+    }
 }
 
 function makeBlobServiceClient(config: Config, file: StrapiFile) {
